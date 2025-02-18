@@ -1,22 +1,23 @@
 using Unity.Netcode;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
 public class NetworkManagerUI : MonoBehaviour
 {
-    [SerializeField] private Button hostButton;
-    [SerializeField] private Button joinButton;
-    [SerializeField] private TMP_InputField joinCodeInput;
-
-    private void Awake()
+    public void StartHost()
     {
-        hostButton.onClick.AddListener(() => {
-            NetworkManager.Singleton.StartHost();
-        });
+        NetworkManager.Singleton.StartHost();
+        Debug.Log("Started Host");
+    }
 
-        joinButton.onClick.AddListener(() => {
-            NetworkManager.Singleton.StartClient();
-        });
+    public void StartClient()
+    {
+        NetworkManager.Singleton.StartClient();
+        Debug.Log("Started Client");
+    }
+
+    public void DisconnectGame()
+    {
+        NetworkManager.Singleton.Shutdown();
+        Debug.Log("Disconnected");
     }
 }
