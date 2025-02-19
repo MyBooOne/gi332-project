@@ -1,97 +1,96 @@
 using Unity.Netcode;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
 public class TankController : NetworkBehaviour
 {
-    [Header("Movement Settings")]
+    [Header("Tank Settings")]
     [SerializeField] private float moveSpeed = 5f;
-    [SerializeField] private float rotateSpeed = 100f;
-    [SerializeField] private float turretRotateSpeed = 100f;
-
-    [Header("References")]
-    [SerializeField] private Transform turretTransform; // หอปืน
-    [SerializeField] private Transform barrelTransform; // ปากกระบอก
-
+    [SerializeField] private float rotationSpeed = 100f;
+    
     private Rigidbody rb;
-    private Vector2 movement;
-    private float mouseX;
+    private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>();
+    private NetworkVariable<Quaternion> networkRotation = new NetworkVariable<Quaternion>();
 
     private void Awake()
     {
+        // ไม่จำเป็นต้องกำหนด NetworkVariableSettings แล้ว
+        // เพราะ NetworkVariable จะจัดการสิทธิ์การเข้าถึงให้อัตโนมัติ
+    }
+
+    void Start()
+    {
         rb = GetComponent<Rigidbody>();
-        // Lock cursor to center of screen
-        Cursor.lockState = CursorLockMode.Locked;
+        
+        if (rb != null)
+        {
+            rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        }
     }
 
-    private void Update()
+    void Update()
     {
-        if (!IsOwner) return;
-
-        HandleInput();
-        HandleTurretRotation();
-    }
-
-    private void FixedUpdate()
-    {
-        if (!IsOwner) return;
+        if (!IsOwner) 
+        {
+            // ถ้าไม่ใช่เจ้าของ ให้อัพเดทตำแหน่งตาม NetworkVariable
+            transform.position = networkPosition.Value;
+            transform.rotation = networkRotation.Value;
+            return;
+        }
 
         HandleMovement();
     }
 
-    private void HandleInput()
+    void HandleMovement()
     {
-        // WASD input
-        movement.x = Input.GetAxisRaw("Horizontal"); // A,D หรือ ←,→
-        movement.y = Input.GetAxisRaw("Vertical");   // W,S หรือ ↑,↓
-        movement = movement.normalized;
+        float moveInput = 0f;
+        float rotateInput = 0f;
 
-        // Mouse input for turret rotation
-        mouseX = Input.GetAxis("Mouse X");
-    }
+        // W = เดินหน้า, S = ถอยหลัง
+        if (Input.GetKey(KeyCode.W))
+            moveInput = 1f;
+        else if (Input.GetKey(KeyCode.S))
+            moveInput = -1f;
 
-    private void HandleMovement()
-    {
-        // Forward/Backward movement
-        Vector3 moveDirection = transform.forward * movement.y;
-        rb.MovePosition(rb.position + moveDirection * moveSpeed * Time.fixedDeltaTime);
+        // A = หมุนซ้าย, D = หมุนขวา
+        if (Input.GetKey(KeyCode.D))
+            rotateInput = 1f;
+        else if (Input.GetKey(KeyCode.A))
+            rotateInput = -1f;
 
-        // Tank rotation (left/right)
-        if (movement.x != 0)
+        // คำนวณการเคลื่อนที่
+        Vector3 movement = transform.forward * moveInput * moveSpeed * Time.deltaTime;
+        
+        // คำนวณการหมุน
+        float rotation = rotateInput * rotationSpeed * Time.deltaTime;
+
+        if (rb != null)
         {
-            Quaternion rotation = Quaternion.Euler(0f, movement.x * rotateSpeed * Time.fixedDeltaTime, 0f);
-            rb.MoveRotation(rb.rotation * rotation);
+            // เคลื่อนที่ local ก่อน
+            rb.MovePosition(rb.position + movement);
+            Quaternion turnRotation = Quaternion.Euler(0f, rotation, 0f);
+            rb.MoveRotation(rb.rotation * turnRotation);
+
+            // ส่ง ServerRpc เพื่ออัพเดทตำแหน่งบน server
+            UpdatePositionServerRpc(rb.position, rb.rotation);
         }
     }
 
-    private void HandleTurretRotation()
+    [ServerRpc]
+    private void UpdatePositionServerRpc(Vector3 position, Quaternion rotation)
     {
-        if (turretTransform != null)
-        {
-            // Rotate turret based on mouse X movement
-            turretTransform.Rotate(0f, mouseX * turretRotateSpeed * Time.deltaTime, 0f, Space.World);
-        }
+        // อัพเดทค่าใน NetworkVariable
+        networkPosition.Value = position;
+        networkRotation.Value = rotation;
     }
 
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
-        if (IsOwner)
+        
+        if (IsServer)
         {
-            // Initialize any owner-specific setup
-            Camera.main.transform.parent = turretTransform;
-            Camera.main.transform.localPosition = new Vector3(0f, 2f, -4f);
-            Camera.main.transform.localRotation = Quaternion.Euler(20f, 0f, 0f);
-        }
-    }
-
-    private void OnDestroy()
-    {
-        if (IsOwner)
-        {
-            // Reset cursor when destroyed
-            Cursor.lockState = CursorLockMode.None;
+            networkPosition.Value = transform.position;
+            networkRotation.Value = transform.rotation;
         }
     }
 }
