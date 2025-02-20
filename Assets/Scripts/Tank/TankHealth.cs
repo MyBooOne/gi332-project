@@ -15,7 +15,7 @@ namespace Complete
 
         private AudioSource m_ExplosionAudio;
         private ParticleSystem m_ExplosionParticles;
-        private NetworkVariable<float> m_CurrentHealth = new NetworkVariable<float>();
+        public NetworkVariable<float> m_CurrentHealth = new NetworkVariable<float>();
         private NetworkVariable<bool> m_Dead = new NetworkVariable<bool>();
 
         public override void OnNetworkSpawn()
