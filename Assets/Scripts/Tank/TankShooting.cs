@@ -1,100 +1,77 @@
-﻿using UnityEngine;
-using UnityEngine.UI;
-using Unity.Netcode;  // เพิ่ม Netcode for GameObjects
+using UnityEngine;
+using Unity.Netcode;
 
 namespace Complete
 {
-    public class TankShooting : NetworkBehaviour  // เปลี่ยนจาก MonoBehaviour เป็น NetworkBehaviour
+    public class TankShooting : NetworkBehaviour
     {
-        // คงตัวแปรเดิมไว้
-        [SerializeField] public int m_PlayerNumber = 1;
-        [SerializeField] private Rigidbody m_Shell;
+        [SerializeField] private GameObject m_ShellPrefab;
         [SerializeField] private Transform m_FireTransform;
-        [SerializeField] private Slider m_AimSlider;
-        [SerializeField] private AudioSource m_ShootingAudio;
-        [SerializeField] private AudioClip m_ChargingClip;
-        [SerializeField] private AudioClip m_FireClip;
-        [SerializeField] private float m_MinLaunchForce = 15f;
-        [SerializeField] private float m_MaxLaunchForce = 30f;
-        [SerializeField] private float m_MaxChargeTime = 0.75f;
+        [SerializeField] private float m_LaunchForce = 20f;
+        [SerializeField] private float m_CooldownTime = 0.5f;
+        
+        private float m_NextFireTime;
+        private AudioSource m_ShootingAudio;
 
-        private string m_FireButton;
-        private float m_CurrentLaunchForce;
-        private float m_ChargeSpeed;
-        private bool m_Fired;
-
-        public override void OnNetworkSpawn()
+        private void Start()
         {
-            if (!IsOwner) return; // ถ้าไม่ใช่เจ้าของ object ไม่ต้องทำอะไร
-            
-            m_CurrentLaunchForce = m_MinLaunchForce;
-            m_FireButton = "Fire" + m_PlayerNumber;
-            m_ChargeSpeed = (m_MaxLaunchForce - m_MinLaunchForce) / m_MaxChargeTime;
+            m_ShootingAudio = GetComponent<AudioSource>();
         }
 
         private void Update()
         {
-            if (!IsOwner) return; // ตรวจสอบว่าเป็นเจ้าของหรือไม่
+            if (!IsOwner) return;
 
-            HandleFiring();
-        }
-
-        private void HandleFiring()
-        {
-            m_AimSlider.value = m_MinLaunchForce;
-
-            if (m_CurrentLaunchForce >= m_MaxLaunchForce && !m_Fired)
-            {
-                m_CurrentLaunchForce = m_MaxLaunchForce;
-                FireServerRpc();
-            }
-            else if (Input.GetButtonDown(m_FireButton))
-            {
-                m_Fired = false;
-                m_CurrentLaunchForce = m_MinLaunchForce;
-                PlayChargingAudioClientRpc();
-            }
-            else if (Input.GetButton(m_FireButton) && !m_Fired)
-            {
-                m_CurrentLaunchForce += m_ChargeSpeed * Time.deltaTime;
-                m_AimSlider.value = m_CurrentLaunchForce;
-            }
-            else if (Input.GetButtonUp(m_FireButton) && !m_Fired)
+            if (Input.GetKeyDown(KeyCode.Space) && Time.time >= m_NextFireTime)
             {
                 FireServerRpc();
+                m_NextFireTime = Time.time + m_CooldownTime;
             }
         }
 
         [ServerRpc]
         private void FireServerRpc()
         {
-            m_Fired = true;
+            // สร้างกระสุน
+            GameObject shellInstance = Instantiate(
+                m_ShellPrefab,
+                m_FireTransform.position,
+                m_FireTransform.rotation
+            );
+
+            // ตั้งค่า NetworkObject
+            NetworkObject networkObject = shellInstance.GetComponent<NetworkObject>();
             
-            // สร้างกระสุนบน Server
-            Rigidbody shellInstance = Instantiate(m_Shell, m_FireTransform.position, m_FireTransform.rotation);
-            shellInstance.velocity = m_CurrentLaunchForce * m_FireTransform.forward;
-            
-            // Spawn กระสุนให้ทุก Client เห็น
-            shellInstance.GetComponent<NetworkObject>().Spawn();
-            
-            // เล่นเสียงบนทุก Client
-            PlayFireAudioClientRpc();
-            
-            m_CurrentLaunchForce = m_MinLaunchForce;
+            // ตั้งค่า Rigidbody
+            Rigidbody shellRigidbody = shellInstance.GetComponent<Rigidbody>();
+            if (shellRigidbody != null)
+            {
+                // สำคัญ: ต้องตั้ง properties ของ Rigidbody ก่อน Spawn
+                shellRigidbody.isKinematic = false;
+                shellRigidbody.useGravity = true;
+                shellRigidbody.collisionDetectionMode = CollisionDetectionMode.Continuous;
+                
+                // Spawn บนเน็ตเวิร์ค
+                networkObject.Spawn();
+                
+                // ใส่แรงให้กระสุนหลังจาก Spawn
+                shellRigidbody.AddForce(m_FireTransform.forward * m_LaunchForce, ForceMode.Impulse);
+            }
+
+            // เล่นเสียงยิง
+            FireClientRpc();
+
+            // ทำลายกระสุนหลังจาก 3 วินาที
+            Destroy(shellInstance, 3f);
         }
 
         [ClientRpc]
-        private void PlayChargingAudioClientRpc()
+        private void FireClientRpc()
         {
-            m_ShootingAudio.clip = m_ChargingClip;
-            m_ShootingAudio.Play();
-        }
-
-        [ClientRpc]
-        private void PlayFireAudioClientRpc()
-        {
-            m_ShootingAudio.clip = m_FireClip;
-            m_ShootingAudio.Play();
+            if (m_ShootingAudio != null)
+            {
+                m_ShootingAudio.Play();
+            }
         }
     }
 }
