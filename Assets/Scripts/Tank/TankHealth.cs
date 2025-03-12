@@ -16,7 +16,7 @@ namespace Complete
         private AudioSource m_ExplosionAudio;
         private ParticleSystem m_ExplosionParticles;
         public NetworkVariable<float> m_CurrentHealth = new NetworkVariable<float>();
-        private NetworkVariable<bool> m_Dead = new NetworkVariable<bool>();
+        public NetworkVariable<bool> m_Dead = new NetworkVariable<bool>();
 
         public override void OnNetworkSpawn()
         {
@@ -80,7 +80,56 @@ namespace Complete
             m_ExplosionParticles.gameObject.SetActive(true);
             m_ExplosionParticles.Play();
             m_ExplosionAudio.Play();
-            gameObject.SetActive(false);
+            
+            // เปลี่ยนจากการปิดใช้งานวัตถุเป็นแค่การปิดใช้งานบางส่วน
+            // gameObject.SetActive(false);
+            // แทนที่จะปิดวัตถุทั้งหมด เราจะซ่อนแค่ส่วนที่มองเห็นได้
+            
+            // ซ่อนโมเดล 3D ของรถถังแทน (ถ้ามี)
+            foreach (var renderer in GetComponentsInChildren<Renderer>())
+            {
+                renderer.enabled = false;
+            }
+            
+            // ปิดการใช้งานเสียง
+            foreach (var audioSource in GetComponentsInChildren<AudioSource>())
+            {
+                audioSource.enabled = false;
+            }
+            
+            // ปิดการใช้งานคอลไลเดอร์
+            foreach (var collider in GetComponentsInChildren<Collider>())
+            {
+                collider.enabled = false;
+            }
+        }
+
+        // เพิ่มเมธอดนี้เพื่อการฟื้นฟูรถถัง
+        public void ResetTank()
+        {
+            // เปิดใช้งานโมเดล
+            foreach (var renderer in GetComponentsInChildren<Renderer>())
+            {
+                renderer.enabled = true;
+            }
+            
+            // เปิดใช้งานเสียง
+            foreach (var audioSource in GetComponentsInChildren<AudioSource>())
+            {
+                audioSource.enabled = true;
+            }
+            
+            // เปิดใช้งานคอลไลเดอร์
+            foreach (var collider in GetComponentsInChildren<Collider>())
+            {
+                collider.enabled = true;
+            }
+        }
+        
+        // ฟังก์ชันสำหรับคืนค่า m_StartingHealth
+        public float GetStartingHealth()
+        {
+            return m_StartingHealth;
         }
     }
 }
