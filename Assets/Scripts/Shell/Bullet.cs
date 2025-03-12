@@ -1,81 +1,91 @@
-using Unity.Netcode;
 using UnityEngine;
+using Unity.Netcode;
 
 public class Bullet : NetworkBehaviour
 {
-    [SerializeField] private float damage = 10f;
+    [SerializeField] private float damage = 20f;
     [SerializeField] private float bulletLifetime = 3f;
+    [SerializeField] private GameObject hitEffectPrefab;
     
-    private Rigidbody rb;
+    // Store shooter's client ID
     private ulong shooterClientId;
     
-    void Awake()
+    public void SetShooterInfo(ulong clientId)
     {
-        rb = GetComponent<Rigidbody>();
+        shooterClientId = clientId;
+        Debug.Log($"[Bullet] Set shooter ClientId: {clientId}");
     }
     
     public override void OnNetworkSpawn()
     {
-        // ทำลายกระสุนหลังจากเวลาที่กำหนด
-        Destroy(gameObject, bulletLifetime);
-    }
-    
-    // เรียกโดย TankShooting เพื่อตั้งค่ากระสุน
-    public void Initialize(ulong clientId, Vector3 initialVelocity)
-    {
-        shooterClientId = clientId;
+        base.OnNetworkSpawn();
         
-        // กำหนดความเร็วเริ่มต้น
-        if (rb != null)
+        // Destroy bullet after set time (server only)
+        if (IsServer)
         {
-            rb.velocity = initialVelocity;
-            
-            // สำคัญ: ลองตรวจสอบโดย Log ว่ากระสุนได้รับความเร็วจริงๆ
-            Debug.Log("กำหนดความเร็วกระสุน: " + initialVelocity.magnitude);
+            Destroy(gameObject, bulletLifetime);
         }
     }
-
+    
     private void OnCollisionEnter(Collision collision)
     {
-        // ตรวจสอบว่าเป็นเซิร์ฟเวอร์เท่านั้น
+        // Server-only logic
         if (!IsServer) return;
         
-        // บันทึก log ว่าชนกับอะไร
-        Debug.Log("กระสุนชนกับ: " + collision.gameObject.name);
+        // Show hit effect
+        if (hitEffectPrefab != null && collision.contacts.Length > 0)
+        {
+            GameObject hitEffect = Instantiate(
+                hitEffectPrefab, 
+                collision.contacts[0].point, 
+                Quaternion.LookRotation(collision.contacts[0].normal)
+            );
+            
+            // Destroy effect after 2 seconds
+            Destroy(hitEffect, 2f);
+        }
         
-        // ตรวจสอบว่าชนกับรถถังหรือไม่
+        // Check if we hit a tank
         Complete.TankHealth tankHealth = collision.gameObject.GetComponent<Complete.TankHealth>();
         if (tankHealth != null)
         {
-            // ตรวจสอบว่าไม่ใช่การชนกับรถถังของตัวเอง
             NetworkObject targetNetObj = collision.gameObject.GetComponent<NetworkObject>();
+            
+            // Make sure we're not hitting our own tank
             if (targetNetObj != null && targetNetObj.OwnerClientId != shooterClientId)
             {
-                // ทำให้รถถังเสียหาย
-                tankHealth.TakeDamage(damage);
-                Debug.Log("กระสุนทำดาเมจ: " + damage);
+                Debug.Log($"[Bullet] Hit tank - Shooter: {shooterClientId}, Target: {targetNetObj.OwnerClientId}");
+                
+                // Deal damage
+                tankHealth.TakeDamage(damage, shooterClientId);
+                
+                // Check if tank died
+                if (tankHealth.m_CurrentHealth.Value <= 0 && !tankHealth.m_Dead.Value)
+                {
+                    // Add score to shooter
+                    if (TeamScoreManager.Instance != null)
+                    {
+                        Debug.Log($"[Bullet] Adding score to shooter ClientId: {shooterClientId}");
+                        TeamScoreManager.Instance.AddScore(shooterClientId);
+                    }
+                    else
+                    {
+                        Debug.LogError("[Bullet] TeamScoreManager.Instance not found");
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log("[Bullet] Hit own tank or NetworkObject not found - no damage applied");
             }
         }
         
-        // ทำลายกระสุน
-        NetworkObject networkObject = GetComponent<NetworkObject>();
-        if (networkObject != null && networkObject.IsSpawned)
+        // Destroy bullet
+        NetworkObject netObj = gameObject.GetComponent<NetworkObject>();
+        if (netObj != null && netObj.IsSpawned)
         {
-            networkObject.Despawn(true);
+            netObj.Despawn();
         }
-        else
-        {
-            Destroy(gameObject);
-        }
-    }
-    
-    // เพิ่ม Update เพื่อตรวจสอบความเร็วของกระสุน
-    private void Update()
-    {
-        if (rb != null && rb.velocity.magnitude < 0.1f)
-        {
-            // ถ้ากระสุนไม่เคลื่อนที่ บันทึก log
-            Debug.LogWarning("กระสุนไม่เคลื่อนที่! ความเร็ว = " + rb.velocity.magnitude);
-        }
+        Destroy(gameObject);
     }
 }

@@ -45,7 +45,7 @@ namespace Complete
                     float damage = CalculateDamage(collider.transform.position, explosionPosition);
                     
                     // ทำดาเมจกับรถถัง
-                    targetHealth.TakeDamage(damage);
+                   // targetHealth.TakeDamage(damage);
                 }
             }
 

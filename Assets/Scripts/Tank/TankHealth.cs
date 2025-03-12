@@ -17,6 +17,9 @@ namespace Complete
         private ParticleSystem m_ExplosionParticles;
         public NetworkVariable<float> m_CurrentHealth = new NetworkVariable<float>();
         public NetworkVariable<bool> m_Dead = new NetworkVariable<bool>();
+        
+        // Track the last player who damaged this tank
+        public NetworkVariable<ulong> m_LastAttackerId = new NetworkVariable<ulong>(ulong.MaxValue);
 
         public override void OnNetworkSpawn()
         {
@@ -26,7 +29,7 @@ namespace Complete
                 m_Dead.Value = false;
             }
 
-            // ติดตามการเปลี่ยนแปลงของ health
+            // Subscribe to health changes
             m_CurrentHealth.OnValueChanged += OnHealthChanged;
             
             SetupExplosion();
@@ -51,9 +54,13 @@ namespace Complete
             }
         }
 
-        public void TakeDamage(float amount)
+        public void TakeDamage(float amount, ulong attackerId)
         {
             if (!IsServer) return;
+            
+            // Record the attacker ID
+            m_LastAttackerId.Value = attackerId;
+            Debug.Log($"[TankHealth] Taking damage: {amount} from attacker: {attackerId}, Current health: {m_CurrentHealth.Value}");
             
             m_CurrentHealth.Value -= amount;
         }
@@ -69,7 +76,16 @@ namespace Complete
         {
             if (m_Dead.Value) return;
             
+            Debug.Log($"[TankHealth] Tank died, last attacker: {m_LastAttackerId.Value}");
             m_Dead.Value = true;
+            
+            // Add score to killer if TeamScoreManager exists
+            if (TeamScoreManager.Instance != null && m_LastAttackerId.Value != ulong.MaxValue)
+            {
+                Debug.Log($"[TankHealth] Adding score to killer: {m_LastAttackerId.Value}");
+                TeamScoreManager.Instance.AddScore(m_LastAttackerId.Value);
+            }
+            
             OnDeathClientRpc();
         }
 
@@ -81,52 +97,48 @@ namespace Complete
             m_ExplosionParticles.Play();
             m_ExplosionAudio.Play();
             
-            // เปลี่ยนจากการปิดใช้งานวัตถุเป็นแค่การปิดใช้งานบางส่วน
-            // gameObject.SetActive(false);
-            // แทนที่จะปิดวัตถุทั้งหมด เราจะซ่อนแค่ส่วนที่มองเห็นได้
-            
-            // ซ่อนโมเดล 3D ของรถถังแทน (ถ้ามี)
+            // Hide the tank visually instead of disabling the entire object
             foreach (var renderer in GetComponentsInChildren<Renderer>())
             {
                 renderer.enabled = false;
             }
             
-            // ปิดการใช้งานเสียง
+            // Disable audio
             foreach (var audioSource in GetComponentsInChildren<AudioSource>())
             {
                 audioSource.enabled = false;
             }
             
-            // ปิดการใช้งานคอลไลเดอร์
+            // Disable colliders
             foreach (var collider in GetComponentsInChildren<Collider>())
             {
                 collider.enabled = false;
             }
         }
 
-        // เพิ่มเมธอดนี้เพื่อการฟื้นฟูรถถัง
+        // Method to restore the tank
         public void ResetTank()
         {
-            // เปิดใช้งานโมเดล
+            // Enable renderers
             foreach (var renderer in GetComponentsInChildren<Renderer>())
             {
                 renderer.enabled = true;
             }
             
-            // เปิดใช้งานเสียง
+            // Enable audio
             foreach (var audioSource in GetComponentsInChildren<AudioSource>())
             {
                 audioSource.enabled = true;
             }
             
-            // เปิดใช้งานคอลไลเดอร์
+            // Enable colliders
             foreach (var collider in GetComponentsInChildren<Collider>())
             {
                 collider.enabled = true;
             }
         }
         
-        // ฟังก์ชันสำหรับคืนค่า m_StartingHealth
+        // Get starting health value
         public float GetStartingHealth()
         {
             return m_StartingHealth;
