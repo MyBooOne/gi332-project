@@ -92,5 +92,34 @@ public class TankController : NetworkBehaviour
             networkPosition.Value = transform.position;
             networkRotation.Value = transform.rotation;
         }
+        
+        // เพิ่มตรงนี้: เมื่อรถถังของผู้เล่นท้องถิ่นถูกสร้าง ให้บอกกล้องว่าควรติดตามรถถังนี้
+        if (IsOwner)
+        {
+            Debug.Log("รถถังผู้เล่นท้องถิ่นถูกสร้าง: " + gameObject.name);
+            
+            // ตั้ง tag ให้กับรถถัง (ถ้ายังไม่มี)
+            gameObject.tag = "isLocalPlayer";
+            
+            // หา Main Camera และตั้งค่าให้ติดตามรถถังนี้
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                PlayerCameraFollow cameraFollow = mainCamera.GetComponent<PlayerCameraFollow>();
+                if (cameraFollow != null)
+                {
+                    cameraFollow.SetTarget(gameObject);
+                    Debug.Log("ตั้งค่ากล้องให้ติดตามรถถัง: " + gameObject.name);
+                }
+                else
+                {
+                    Debug.LogError("ไม่พบคอมโพเนนต์ PlayerCameraFollow บนกล้อง");
+                }
+            }
+            else
+            {
+                Debug.LogError("ไม่พบ Main Camera ในซีน");
+            }
+        }
     }
 }

@@ -3,9 +3,6 @@ using System.Collections;
 
 public class PlayerCameraFollow : MonoBehaviour
 {
-    // ตัวแปรสำหรับระบุรถถัง (ทั้งการ Host และการ Join)
-    public string localPlayerTag = "LocalPlayer";
-    
     // Transform ของรถถังที่จะตาม
     private Transform target;
     
@@ -23,31 +20,33 @@ public class PlayerCameraFollow : MonoBehaviour
         // บันทึก rotation เริ่มต้นของกล้อง
         initialRotation = transform.rotation;
         
-        // ค้นหารถถังของผู้เล่นท้องถิ่น
-        StartCoroutine(FindLocalPlayerTank());
+        // พยายามค้นหารถถังที่ควรติดตาม
+        StartCoroutine(FindPlayerTank());
     }
     
-    IEnumerator FindLocalPlayerTank()
+    IEnumerator FindPlayerTank()
     {
-        // รอสักครู่ให้ระบบมัลติเพลเยอร์พร้อม
+        // รอให้เกมเริ่มต้นและรถถังถูกสร้าง
         yield return new WaitForSeconds(0.5f);
         
-        // ค้นหารถถังที่มี Tag เป็น "LocalPlayer"
-        GameObject playerTank = GameObject.FindGameObjectWithTag(localPlayerTag);
-        
-        if (playerTank != null)
+        // ถ้ายังไม่มีเป้าหมาย ให้ค้นหารถถังที่มี tag "isLocalPlayer"
+        if (target == null)
         {
-            target = playerTank.transform;
-            Debug.Log("พบรถถังของผู้เล่นท้องถิ่น: " + playerTank.name);
-            
-            // ตั้งตำแหน่งเริ่มต้นของกล้อง
-            UpdateCameraPosition();
-        }
-        else
-        {
-            Debug.LogWarning("ไม่พบรถถังที่มี Tag: " + localPlayerTag + " จะลองค้นหาใหม่ในอีก 1 วินาที");
-            yield return new WaitForSeconds(1.0f);
-            StartCoroutine(FindLocalPlayerTank());
+            GameObject localPlayerTank = GameObject.FindGameObjectWithTag("isLocalPlayer");
+            if (localPlayerTank != null)
+            {
+                target = localPlayerTank.transform;
+                Debug.Log("กล้องพบรถถังของผู้เล่นท้องถิ่นด้วย tag: " + localPlayerTank.name);
+                
+                // ตั้งตำแหน่งเริ่มต้นของกล้อง
+                UpdateCameraPosition();
+            }
+            else
+            {
+                Debug.LogWarning("ไม่พบรถถังที่มี tag isLocalPlayer จะลองอีกครั้งใน 1 วินาที");
+                yield return new WaitForSeconds(1.0f);
+                StartCoroutine(FindPlayerTank());
+            }
         }
     }
     
@@ -75,19 +74,13 @@ public class PlayerCameraFollow : MonoBehaviour
         transform.rotation = initialRotation;
     }
     
-    // เมธอดสำหรับตั้งค่าเป้าหมายใหม่ (เรียกเมื่อผู้เล่นเกิดใหม่)
-    public void SetTarget(Transform newTarget)
+    // เมธอดสำหรับตั้งค่าเป้าหมายโดยตรงจากภายนอก
+    public void SetTarget(GameObject tankObject)
     {
-        target = newTarget;
-    }
-    
-    // สำหรับเรียกจากสคริปต์อื่นเพื่อตั้งค่าให้ตามรถถังนี้
-    public void FollowThisTank(GameObject tank)
-    {
-        if (tank != null)
+        if (tankObject != null)
         {
-            target = tank.transform;
-            Debug.Log("กล้องกำลังตามรถถัง: " + tank.name);
+            target = tankObject.transform;
+            Debug.Log("กล้องตั้งค่าให้ติดตาม: " + tankObject.name);
         }
     }
 }
