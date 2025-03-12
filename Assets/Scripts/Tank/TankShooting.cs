@@ -26,26 +26,50 @@ public class TankShooting : NetworkBehaviour
             // ตั้งเวลายิงครั้งต่อไป
             nextFireTime = Time.time + fireRate;
             
-            // ส่งคำขอให้เซิร์ฟเวอร์สร้างกระสุน
+            // เล่นเสียงยิงทันที
+            if (audioSource != null && shootSound != null)
+            {
+                audioSource.PlayOneShot(shootSound);
+            }
+            
+            // ส่งคำขอให้ server สร้างกระสุน
             FireServerRpc();
+            
+            // บันทึก log เพื่อตรวจสอบ
+            Debug.Log("ส่งคำขอยิง!");
         }
     }
     
     [ServerRpc]
     private void FireServerRpc(ServerRpcParams serverRpcParams = default)
     {
+        Debug.Log("Server ได้รับคำขอยิง");
+        
         // คำนวณความเร็วของกระสุน
         Vector3 bulletVelocity = firePoint.forward * bulletSpeed;
         
         // สร้างกระสุนบนเซิร์ฟเวอร์
         GameObject bulletObject = Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
         
-        // ตั้งค่ากระสุนก่อน Spawn
+        // ตั้งค่า Rigidbody ของกระสุน
         Rigidbody bulletRb = bulletObject.GetComponent<Rigidbody>();
         if (bulletRb != null)
         {
             // กำหนดความเร็วเริ่มต้น
             bulletRb.velocity = bulletVelocity;
+            
+            // ให้แน่ใจว่ากระสุนไม่ใช้ gravity และไม่เป็น kinematic
+            bulletRb.useGravity = false;
+            bulletRb.isKinematic = false;
+            
+            // ลด mass ลงเพื่อป้องกัน knockback
+            bulletRb.mass = 0.01f;
+            
+            Debug.Log("ตั้งค่าความเร็วกระสุน: " + bulletVelocity.magnitude);
+        }
+        else
+        {
+            Debug.LogError("ไม่พบ Rigidbody บนกระสุน!");
         }
         
         // Spawn กระสุนบนเครือข่าย
@@ -60,16 +84,24 @@ public class TankShooting : NetworkBehaviour
             {
                 bullet.Initialize(serverRpcParams.Receive.SenderClientId, bulletVelocity);
             }
+            else
+            {
+                Debug.LogError("ไม่พบ Bullet script บนกระสุน!");
+            }
+        }
+        else
+        {
+            Debug.LogError("ไม่พบ NetworkObject บนกระสุน!");
         }
         
         // เล่นเสียงยิงบนทุกไคลเอนต์
-        PlayShootSoundClientRpc();
+        PlayShootSoundClientRpc(serverRpcParams.Receive.SenderClientId);
     }
     
     [ClientRpc]
-    private void PlayShootSoundClientRpc()
+    private void PlayShootSoundClientRpc(ulong shooterClientId)
     {
-        if (audioSource != null && shootSound != null)
+        if (NetworkManager.Singleton.LocalClientId != shooterClientId && audioSource != null && shootSound != null)
         {
             audioSource.PlayOneShot(shootSound);
         }

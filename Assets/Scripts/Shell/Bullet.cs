@@ -30,19 +30,18 @@ public class Bullet : NetworkBehaviour
         {
             rb.velocity = initialVelocity;
             
-            // เพิ่มการตั้งค่า Rigidbody
-            rb.interpolation = RigidbodyInterpolation.Interpolate;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-            
-            // สำคัญมาก: เพิ่มแรงเล็กน้อยเพื่อให้แน่ใจว่ากระสุนเคลื่อนที่
-            rb.AddForce(initialVelocity.normalized * 0.1f, ForceMode.Impulse);
+            // สำคัญ: ลองตรวจสอบโดย Log ว่ากระสุนได้รับความเร็วจริงๆ
+            Debug.Log("กำหนดความเร็วกระสุน: " + initialVelocity.magnitude);
         }
     }
 
     private void OnCollisionEnter(Collision collision)
     {
-        // ตรวจสอบว่าเป็นเซิร์ฟเวอร์เท่านั้น (เซิร์ฟเวอร์จัดการความเสียหาย)
+        // ตรวจสอบว่าเป็นเซิร์ฟเวอร์เท่านั้น
         if (!IsServer) return;
+        
+        // บันทึก log ว่าชนกับอะไร
+        Debug.Log("กระสุนชนกับ: " + collision.gameObject.name);
         
         // ตรวจสอบว่าชนกับรถถังหรือไม่
         Complete.TankHealth tankHealth = collision.gameObject.GetComponent<Complete.TankHealth>();
@@ -58,16 +57,25 @@ public class Bullet : NetworkBehaviour
             }
         }
         
-        // แจ้งไคลเอนต์ทั้งหมดเรื่องการชน
-        BulletHitClientRpc();
-        
         // ทำลายกระสุน
-        Destroy(gameObject);
+        NetworkObject networkObject = GetComponent<NetworkObject>();
+        if (networkObject != null && networkObject.IsSpawned)
+        {
+            networkObject.Despawn(true);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
     }
     
-    [ClientRpc]
-    private void BulletHitClientRpc()
+    // เพิ่ม Update เพื่อตรวจสอบความเร็วของกระสุน
+    private void Update()
     {
-        // เล่นเสียงหรือเอฟเฟกต์การชน (ถ้ามี)
+        if (rb != null && rb.velocity.magnitude < 0.1f)
+        {
+            // ถ้ากระสุนไม่เคลื่อนที่ บันทึก log
+            Debug.LogWarning("กระสุนไม่เคลื่อนที่! ความเร็ว = " + rb.velocity.magnitude);
+        }
     }
 }

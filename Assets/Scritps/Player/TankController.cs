@@ -10,12 +10,12 @@ public class TankController : NetworkBehaviour
     private Rigidbody rb;
     private NetworkVariable<Vector3> networkPosition = new NetworkVariable<Vector3>();
     private NetworkVariable<Quaternion> networkRotation = new NetworkVariable<Quaternion>();
-
-    private void Awake()
-    {
-        // ไม่จำเป็นต้องกำหนด NetworkVariableSettings แล้ว
-        // เพราะ NetworkVariable จะจัดการสิทธิ์การเข้าถึงให้อัตโนมัติ
-    }
+    
+    // เพิ่มตัวแปรสำหรับทำ interpolation
+    private Vector3 oldPosition;
+    private Quaternion oldRotation;
+    private float lerpTime = 0f;
+    private const float LERP_RATE = 10f; // ปรับค่านี้ตามความเหมาะสม (ค่าสูง = เคลื่อนที่เร็วขึ้น)
 
     void Start()
     {
@@ -24,6 +24,79 @@ public class TankController : NetworkBehaviour
         if (rb != null)
         {
             rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+            // เพิ่ม interpolation ให้กับ Rigidbody
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+        }
+        
+        oldPosition = transform.position;
+        oldRotation = transform.rotation;
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        base.OnNetworkSpawn();
+        
+        if (IsServer)
+        {
+            networkPosition.Value = transform.position;
+            networkRotation.Value = transform.rotation;
+        }
+        
+        // ติดตามการเปลี่ยนแปลงของตำแหน่งและการหมุน
+        networkPosition.OnValueChanged += OnPositionChanged;
+        networkRotation.OnValueChanged += OnRotationChanged;
+        
+        if (IsOwner)
+        {
+            Debug.Log("รถถังผู้เล่นท้องถิ่นถูกสร้าง: " + gameObject.name);
+            
+            // ตั้ง tag ให้กับรถถัง
+            gameObject.tag = "isLocalPlayer";
+            
+            // ตั้งค่ากล้อง
+            SetupCamera();
+        }
+    }
+    
+    private void SetupCamera()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera != null)
+        {
+            PlayerCameraFollow cameraFollow = mainCamera.GetComponent<PlayerCameraFollow>();
+            if (cameraFollow != null)
+            {
+                cameraFollow.SetTarget(gameObject);
+                Debug.Log("ตั้งค่ากล้องให้ติดตามรถถัง: " + gameObject.name);
+            }
+            else
+            {
+                Debug.LogError("ไม่พบคอมโพเนนต์ PlayerCameraFollow บนกล้อง");
+            }
+        }
+        else
+        {
+            Debug.LogError("ไม่พบ Main Camera ในซีน");
+        }
+    }
+    
+    private void OnPositionChanged(Vector3 oldValue, Vector3 newValue)
+    {
+        if (!IsOwner)
+        {
+            // เมื่อได้รับตำแหน่งใหม่ บันทึกตำแหน่งเก่าและเริ่มการ lerp ใหม่
+            oldPosition = transform.position;
+            lerpTime = 0f;
+        }
+    }
+    
+    private void OnRotationChanged(Quaternion oldValue, Quaternion newValue)
+    {
+        if (!IsOwner)
+        {
+            // เมื่อได้รับการหมุนใหม่ บันทึกการหมุนเก่าและเริ่มการ lerp ใหม่
+            oldRotation = transform.rotation;
+            lerpTime = 0f;
         }
     }
 
@@ -31,9 +104,14 @@ public class TankController : NetworkBehaviour
     {
         if (!IsOwner) 
         {
-            // ถ้าไม่ใช่เจ้าของ ให้อัพเดทตำแหน่งตาม NetworkVariable
-            transform.position = networkPosition.Value;
-            transform.rotation = networkRotation.Value;
+            // ถ้าไม่ใช่เจ้าของ ให้ทำ interpolation
+            lerpTime += Time.deltaTime;
+            float t = lerpTime * LERP_RATE;
+            
+            // Lerp ตำแหน่งและการหมุน
+            transform.position = Vector3.Lerp(oldPosition, networkPosition.Value, t);
+            transform.rotation = Quaternion.Slerp(oldRotation, networkRotation.Value, t);
+            
             return;
         }
 
@@ -81,45 +159,5 @@ public class TankController : NetworkBehaviour
         // อัพเดทค่าใน NetworkVariable
         networkPosition.Value = position;
         networkRotation.Value = rotation;
-    }
-
-    public override void OnNetworkSpawn()
-    {
-        base.OnNetworkSpawn();
-        
-        if (IsServer)
-        {
-            networkPosition.Value = transform.position;
-            networkRotation.Value = transform.rotation;
-        }
-        
-        // เพิ่มตรงนี้: เมื่อรถถังของผู้เล่นท้องถิ่นถูกสร้าง ให้บอกกล้องว่าควรติดตามรถถังนี้
-        if (IsOwner)
-        {
-            Debug.Log("รถถังผู้เล่นท้องถิ่นถูกสร้าง: " + gameObject.name);
-            
-            // ตั้ง tag ให้กับรถถัง (ถ้ายังไม่มี)
-            gameObject.tag = "isLocalPlayer";
-            
-            // หา Main Camera และตั้งค่าให้ติดตามรถถังนี้
-            Camera mainCamera = Camera.main;
-            if (mainCamera != null)
-            {
-                PlayerCameraFollow cameraFollow = mainCamera.GetComponent<PlayerCameraFollow>();
-                if (cameraFollow != null)
-                {
-                    cameraFollow.SetTarget(gameObject);
-                    Debug.Log("ตั้งค่ากล้องให้ติดตามรถถัง: " + gameObject.name);
-                }
-                else
-                {
-                    Debug.LogError("ไม่พบคอมโพเนนต์ PlayerCameraFollow บนกล้อง");
-                }
-            }
-            else
-            {
-                Debug.LogError("ไม่พบ Main Camera ในซีน");
-            }
-        }
     }
 }
