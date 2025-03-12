@@ -1,77 +1,77 @@
-using UnityEngine;
 using Unity.Netcode;
+using UnityEngine;
 
-namespace Complete
+public class TankShooting : NetworkBehaviour
 {
-    public class TankShooting : NetworkBehaviour
+    [Header("กระสุน")]
+    [SerializeField] private GameObject bulletPrefab;
+    [SerializeField] private Transform firePoint;
+    [SerializeField] private float bulletSpeed = 20f;
+    [SerializeField] private float fireRate = 0.5f;
+    
+    [Header("เสียง")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip shootSound;
+    
+    private float nextFireTime = 0f;
+    
+    void Update()
     {
-        [SerializeField] private GameObject m_ShellPrefab;
-        [SerializeField] private Transform m_FireTransform;
-        [SerializeField] private float m_LaunchForce = 20f;
-        [SerializeField] private float m_CooldownTime = 0.5f;
+        // เฉพาะเจ้าของรถถังเท่านั้นที่ควบคุมการยิง
+        if (!IsOwner) return;
         
-        private float m_NextFireTime;
-        private AudioSource m_ShootingAudio;
-
-        private void Start()
+        // ตรวจสอบการกดปุ่มยิง
+        if (Input.GetKeyDown(KeyCode.Space) && Time.time >= nextFireTime)
         {
-            m_ShootingAudio = GetComponent<AudioSource>();
-        }
-
-        private void Update()
-        {
-            if (!IsOwner) return;
-
-            if (Input.GetKeyDown(KeyCode.Space) && Time.time >= m_NextFireTime)
-            {
-                FireServerRpc();
-                m_NextFireTime = Time.time + m_CooldownTime;
-            }
-        }
-
-        [ServerRpc]
-        private void FireServerRpc()
-        {
-            // สร้างกระสุน
-            GameObject shellInstance = Instantiate(
-                m_ShellPrefab,
-                m_FireTransform.position,
-                m_FireTransform.rotation
-            );
-
-            // ตั้งค่า NetworkObject
-            NetworkObject networkObject = shellInstance.GetComponent<NetworkObject>();
+            // ตั้งเวลายิงครั้งต่อไป
+            nextFireTime = Time.time + fireRate;
             
-            // ตั้งค่า Rigidbody
-            Rigidbody shellRigidbody = shellInstance.GetComponent<Rigidbody>();
-            if (shellRigidbody != null)
-            {
-                // สำคัญ: ต้องตั้ง properties ของ Rigidbody ก่อน Spawn
-                shellRigidbody.isKinematic = false;
-                shellRigidbody.useGravity = true;
-                shellRigidbody.collisionDetectionMode = CollisionDetectionMode.Continuous;
-                
-                // Spawn บนเน็ตเวิร์ค
-                networkObject.Spawn();
-                
-                // ใส่แรงให้กระสุนหลังจาก Spawn
-                shellRigidbody.AddForce(m_FireTransform.forward * m_LaunchForce, ForceMode.Impulse);
-            }
-
-            // เล่นเสียงยิง
-            FireClientRpc();
-
-            // ทำลายกระสุนหลังจาก 3 วินาที
-            Destroy(shellInstance, 3f);
+            // ส่งคำขอให้เซิร์ฟเวอร์สร้างกระสุน
+            FireServerRpc();
         }
-
-        [ClientRpc]
-        private void FireClientRpc()
+    }
+    
+    [ServerRpc]
+    private void FireServerRpc(ServerRpcParams serverRpcParams = default)
+    {
+        // คำนวณความเร็วของกระสุน
+        Vector3 bulletVelocity = firePoint.forward * bulletSpeed;
+        
+        // สร้างกระสุนบนเซิร์ฟเวอร์
+        GameObject bulletObject = Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
+        
+        // ตั้งค่ากระสุนก่อน Spawn
+        Rigidbody bulletRb = bulletObject.GetComponent<Rigidbody>();
+        if (bulletRb != null)
         {
-            if (m_ShootingAudio != null)
+            // กำหนดความเร็วเริ่มต้น
+            bulletRb.velocity = bulletVelocity;
+        }
+        
+        // Spawn กระสุนบนเครือข่าย
+        NetworkObject bulletNetObj = bulletObject.GetComponent<NetworkObject>();
+        if (bulletNetObj != null)
+        {
+            bulletNetObj.Spawn();
+            
+            // ตั้งค่าข้อมูลกระสุน
+            Bullet bullet = bulletObject.GetComponent<Bullet>();
+            if (bullet != null)
             {
-                m_ShootingAudio.Play();
+                bullet.Initialize(serverRpcParams.Receive.SenderClientId, bulletVelocity);
             }
+        }
+        
+        // เล่นเสียงยิงบนทุกไคลเอนต์
+        PlayShootSoundClientRpc();
+    }
+    
+    [ClientRpc]
+    private void PlayShootSoundClientRpc()
+    {
+        if (audioSource != null && shootSound != null)
+        {
+            audioSource.PlayOneShot(shootSound);
         }
     }
 }
