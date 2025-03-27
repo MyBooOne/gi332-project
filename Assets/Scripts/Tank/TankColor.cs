@@ -71,6 +71,15 @@ public class TankColor : NetworkBehaviour
         blueValue.Value = b;
         alphaValue.Value = a;
     }
+    
+    // เพิ่มใน TankColor.cs
+    public void ApplyColor(Color color)
+    {
+        if (IsOwner) {
+            Debug.Log($"Applying color: {color}");
+            SetColorServerRpc(color.r, color.g, color.b, color.a);
+        }
+    }
 
     public override void OnNetworkDespawn()
     {

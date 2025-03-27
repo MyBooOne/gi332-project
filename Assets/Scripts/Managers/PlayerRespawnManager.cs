@@ -61,40 +61,41 @@ namespace Complete
         }
 
         // จัดการการตายและการเกิดใหม่
+        // ปรับส่วนนี้ใน PlayerRespawnManager.cs ในเมธอด HandleDeath
         private IEnumerator HandleDeath()
         {
-            // แสดงหน้าจอการตายผ่าน UIManager
-            if (DeathUIManager.Instance != null)
+            // แสดงหน้าจอการตายผ่าน DeathUIManager ที่มีอยู่แล้ว
+            if (Complete.DeathUIManager.Instance != null)
             {
-                DeathUIManager.Instance.ShowDeathScreen();
+                Complete.DeathUIManager.Instance.ShowDeathScreen();
             }
             else
             {
                 Debug.LogError("PlayerRespawnManager: ไม่พบ DeathUIManager ในฉาก กรุณาเพิ่ม DeathUIManager ในฉาก");
             }
-            
+    
             // รอจนกระทั่งเวลาเกิดใหม่ผ่านไป
             int countdown = (int)respawnDelay;
-            
+    
             while (countdown > 0)
             {
-                // อัปเดตข้อความนับถอยหลังผ่าน UIManager
-                if (DeathUIManager.Instance != null)
+                // อัปเดตข้อความนับถอยหลังผ่าน DeathUIManager ที่มีอยู่แล้ว
+                if (Complete.DeathUIManager.Instance != null)
                 {
-                    DeathUIManager.Instance.UpdateRespawnCountdown(countdown);
+                    Complete.DeathUIManager.Instance.UpdateRespawnCountdown(countdown);
                 }
-                
+        
                 yield return new WaitForSeconds(1f);
                 countdown--;
             }
-            
+    
             // เมื่อนับถอยหลังเสร็จ ขอให้เกิดใหม่
             RespawnPlayerServerRpc();
-            
-            // ซ่อนหน้าจอการตายผ่าน UIManager
-            if (DeathUIManager.Instance != null)
+    
+            // ซ่อนหน้าจอการตายผ่าน DeathUIManager ที่มีอยู่แล้ว
+            if (Complete.DeathUIManager.Instance != null)
             {
-                DeathUIManager.Instance.HideDeathScreen();
+                Complete.DeathUIManager.Instance.HideDeathScreen();
             }
         }
 
@@ -106,6 +107,26 @@ namespace Complete
             Debug.Log($"Respawning player at position: {respawnPosition}");
             
             // ทำให้เกิดใหม่บนเครื่องของทุกคน
+            RespawnPlayerClientRpc(respawnPosition);
+        }
+        
+        public static void RespawnAllPlayers()
+        {
+            PlayerRespawnManager[] respawnManagers = FindObjectsOfType<PlayerRespawnManager>();
+    
+            foreach (PlayerRespawnManager manager in respawnManagers)
+            {
+                if (manager.IsServer)
+                {
+                    manager.RespawnAllServerRpc();
+                }
+            }
+        }
+
+        [ServerRpc]
+        private void RespawnAllServerRpc()
+        {
+            Vector3 respawnPosition = GetSafeRespawnPosition();
             RespawnPlayerClientRpc(respawnPosition);
         }
 

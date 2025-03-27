@@ -26,6 +26,7 @@ public class TeamScoreManager : NetworkBehaviour
     
     // Store player information
     private readonly Dictionary<ulong, int> playerTeams = new Dictionary<ulong, int>(); // 1 = team1, 2 = team2
+    private readonly Dictionary<ulong, string> playerNames = new Dictionary<ulong, string>(); // เก็บชื่อผู้เล่น
     
     // Team colors
     private readonly NetworkVariable<Color32> team1Color = new NetworkVariable<Color32>(new Color32(255, 0, 0, 255)); // Default: Red
@@ -99,8 +100,14 @@ public class TeamScoreManager : NetworkBehaviour
         team2Score.OnValueChanged += (_, _) => UpdateScoreUI();
         team1Color.OnValueChanged += (_, _) => UpdateScoreUI();
         team2Color.OnValueChanged += (_, _) => UpdateScoreUI();
-        team1Name.OnValueChanged += (_, _) => UpdateScoreUI();
-        team2Name.OnValueChanged += (_, _) => UpdateScoreUI();
+        team1Name.OnValueChanged += (prev, current) => {
+            Debug.Log($"Team1Name changed from {prev} to {current}");
+            UpdateScoreUI();
+        };
+        team2Name.OnValueChanged += (prev, current) => {
+            Debug.Log($"Team2Name changed from {prev} to {current}");
+            UpdateScoreUI();
+        };
         winningTeamName.OnValueChanged += (_, _) => UpdateWinnerText();
         isGameOver.OnValueChanged += OnGameOverChanged;
         
@@ -123,7 +130,91 @@ public class TeamScoreManager : NetworkBehaviour
             StartCoroutine(CheckTeamColorsMultipleTimes());
         }
         
+        // เริ่ม coroutine เพื่อซิงค์ชื่อทีมอย่างต่อเนื่อง
+        StartCoroutine(ContinuousNameSync());
+        
         Debug.Log($"[TeamScoreManager] OnNetworkSpawn - IsServer: {IsServer}, IsOwner: {IsOwner}, IsClient: {IsClient}");
+    }
+    
+    // เพิ่ม coroutine เพื่อซิงค์ชื่อทีมอย่างต่อเนื่อง
+    private IEnumerator ContinuousNameSync()
+    {
+        while (IsSpawned)
+        {
+            // ซิงค์ข้อมูลทุกๆ 2 วินาที
+            yield return new WaitForSeconds(2.0f);
+            
+            if (IsServer)
+            {
+                SyncTeamInfoToClients();
+            }
+            
+            // อัปเดต UI ทุกเครื่อง
+            UpdateScoreUI();
+        }
+    }
+    
+    public void ForceUpdateName(ulong clientId, string playerName)
+    {
+        if (string.IsNullOrEmpty(playerName)) return;
+        
+        Debug.Log($"[TeamScoreManager] ForceUpdateName - ClientId: {clientId}, Name: {playerName}");
+        
+        // เก็บชื่อผู้เล่นไว้ใน Dictionary
+        playerNames[clientId] = playerName;
+        
+        // ตรวจสอบว่าเป็น Host หรือไม่
+        if (clientId == NetworkManager.Singleton.LocalClientId && IsServer)
+        {
+            // อัปเดตทีม 1 (Host)
+            if (IsServer) // เฉพาะเซิร์ฟเวอร์เท่านั้นที่เปลี่ยน NetworkVariable
+            {
+                team1Name.Value = playerName + "'s Team";
+                Debug.Log($"[TeamScoreManager] ForceUpdateName set Team 1 name to: {team1Name.Value}");
+            }
+            
+            // อัปเดต UI ท้องถิ่นทันที
+            if (team1ScoreText != null)
+            {
+                team1ScoreText.text = $"{playerName}'s Team: {team1Score.Value}";
+            }
+        }
+        else
+        {
+            // อัปเดตทีม 2 (Client)
+            if (IsServer) // เฉพาะเซิร์ฟเวอร์เท่านั้นที่เปลี่ยน NetworkVariable
+            {
+                team2Name.Value = playerName + "'s Team";
+                Debug.Log($"[TeamScoreManager] ForceUpdateName set Team 2 name to: {team2Name.Value}");
+            }
+            
+            // อัปเดต UI ท้องถิ่นทันที
+            if (team2ScoreText != null)
+            {
+                team2ScoreText.text = $"{playerName}'s Team: {team2Score.Value}";
+            }
+        }
+        
+        // ถ้าเป็นเซิร์ฟเวอร์ ให้ส่งข้อมูลไปยังทุกไคลเอนต์
+        if (IsServer)
+        {
+            SyncTeamInfoToClients();
+        }
+        else
+        {
+            // หากเป็นไคลเอนต์ ขอให้เซิร์ฟเวอร์อัปเดตชื่อ
+            if (clientId == NetworkManager.Singleton.LocalClientId)
+            {
+                RequestNameUpdateServerRpc(clientId, playerName);
+            }
+        }
+    }
+    
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestNameUpdateServerRpc(ulong clientId, string playerName)
+    {
+        // ให้เซิร์ฟเวอร์ทำการอัปเดตและซิงค์ชื่อผู้เล่น
+        ForceUpdateName(clientId, playerName);
     }
     
     private void InitializeUI()
@@ -192,7 +283,15 @@ public class TeamScoreManager : NetworkBehaviour
                         if (ColorIsDifferent(team1Color.Value, playerColor))
                         {
                             team1Color.Value = playerColor;
-                            team1Name.Value = GetTeamNameFromColor(playerColor);
+                            // ใช้ชื่อผู้เล่นที่เก็บไว้แทนชื่อสี
+                            if (playerNames.TryGetValue(client.ClientId, out string playerName))
+                            {
+                                team1Name.Value = playerName + "'s Team";
+                            }
+                            else
+                            {
+                                team1Name.Value = GetTeamNameFromColor(playerColor);
+                            }
                             colorChanged = true;
                             Debug.Log($"[TeamScoreManager] Updated Team 1 color to {playerColor}, name: {team1Name.Value}");
                         }
@@ -206,7 +305,15 @@ public class TeamScoreManager : NetworkBehaviour
                         if (ColorIsDifferent(team2Color.Value, playerColor))
                         {
                             team2Color.Value = playerColor;
-                            team2Name.Value = GetTeamNameFromColor(playerColor);
+                            // ใช้ชื่อผู้เล่นที่เก็บไว้แทนชื่อสี
+                            if (playerNames.TryGetValue(client.ClientId, out string playerName))
+                            {
+                                team2Name.Value = playerName + "'s Team";
+                            }
+                            else
+                            {
+                                team2Name.Value = GetTeamNameFromColor(playerColor);
+                            }
                             colorChanged = true;
                             Debug.Log($"[TeamScoreManager] Updated Team 2 color to {playerColor}, name: {team2Name.Value}");
                         }
@@ -228,6 +335,44 @@ public class TeamScoreManager : NetworkBehaviour
         return Mathf.Abs(a.r - b.r) > 0.1f || 
                Mathf.Abs(a.g - b.g) > 0.1f || 
                Mathf.Abs(a.b - b.b) > 0.1f;
+    }
+    
+    public string GetTeam1Name()
+    {
+        return team1Name.Value;
+    }
+
+    public string GetTeam2Name()
+    {
+        return team2Name.Value;
+    }
+
+    // เมธอดสำหรับตั้งค่าชื่อทีมโดยตรง (สำหรับไคลเอนต์)
+    public void SetTeamNames(string team1NameStr, string team2NameStr)
+    {
+        Debug.Log($"[TeamScoreManager] SetTeamNames called - Team1: {team1NameStr}, Team2: {team2NameStr}");
+        
+        // ไคลเอนต์ไม่สามารถแก้ไข NetworkVariable ได้โดยตรง
+        // แต่สามารถอัปเดต UI ท้องถิ่นได้
+        if (team1ScoreText != null)
+        {
+            team1ScoreText.text = $"{team1NameStr}: {team1Score.Value}";
+        }
+        
+        if (team2ScoreText != null)
+        {
+            team2ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
+        }
+        
+        // อัปเดต NetworkVariable บนเซิร์ฟเวอร์
+        if (IsServer)
+        {
+            team1Name.Value = team1NameStr;
+            team2Name.Value = team2NameStr;
+            
+            // ซิงค์ข้อมูลไปยังทุกไคลเอนต์
+            SyncTeamInfoToClients();
+        }
     }
     
     private void SyncTeamInfoToClients()
@@ -529,6 +674,61 @@ public class TeamScoreManager : NetworkBehaviour
         UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
     }
     
+    // เพิ่มใน TeamScoreManager.cs
+    public void RegisterPlayerName(ulong clientId, string playerName)
+    {
+        Debug.Log($"[TeamScoreManager] RegisterPlayerName - ClientId: {clientId}, Name: {playerName}");
+        
+        // เก็บชื่อผู้เล่นไว้
+        playerNames[clientId] = playerName;
+    
+        // ตรวจสอบว่าเป็น Host หรือไม่
+        if (clientId == NetworkManager.ServerClientId)
+        {
+            // ปรับชื่อทีม 1 (Host) - เฉพาะเซิร์ฟเวอร์
+            if (IsServer)
+            {
+                team1Name.Value = playerName + "'s Team";
+                Debug.Log($"[TeamScoreManager] Updated Team 1 name to: {team1Name.Value}");
+            }
+        }
+        else
+        {
+            // ปรับชื่อทีม 2 (Client) - เฉพาะเซิร์ฟเวอร์
+            if (IsServer)
+            {
+                team2Name.Value = playerName + "'s Team";
+                Debug.Log($"[TeamScoreManager] Updated Team 2 name to: {team2Name.Value}");
+            }
+        }
+    
+        // อัปเดต UI
+        UpdateScoreUI();
+    
+        // ถ้าเป็นเซิร์ฟเวอร์ ให้ซิงค์ข้อมูลไปยังทุกไคลเอนต์
+        if (IsServer)
+        {
+            SyncTeamInfoToClients();
+        }
+    }
+
+    public void ResetGameState()
+    {
+        team1Score.Value = 0;
+        team2Score.Value = 0;
+        isGameOver.Value = false;
+        winningTeamId.Value = 0;
+        winningTeamName.Value = "";
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        UpdateScoreUI();
+        
+        // ส่งข้อมูลทีมอีกครั้งเมื่อเริ่มเกมใหม่
+        if (IsServer)
+        {
+            SyncTeamInfoToClients();
+        }
+    }
+    
     // For debugging
     public void DebugInfo()
     {
@@ -544,6 +744,12 @@ public class TeamScoreManager : NetworkBehaviour
             Debug.Log($"  Player {pair.Key}: Team {pair.Value}");
         }
         
+        Debug.Log("Player Names:");
+        foreach (var pair in playerNames)
+        {
+            Debug.Log($"  Player {pair.Key}: Name {pair.Value}");
+        }
+        
         Debug.Log("UI Components:");
         Debug.Log($"  team1ScoreText: {(team1ScoreText != null ? "Found" : "Missing")}");
         Debug.Log($"  team2ScoreText: {(team2ScoreText != null ? "Found" : "Missing")}");
@@ -551,5 +757,89 @@ public class TeamScoreManager : NetworkBehaviour
         Debug.Log($"  winnerText: {(winnerText != null ? "Found" : "Missing")}");
         Debug.Log($"  exitButton: {(exitButton != null ? "Found" : "Missing")}");
         Debug.Log("===========================================");
+    }
+    
+    // เพิ่มเมธอดสำหรับการซิงค์ข้อมูลชื่อทีมแบบทันที
+    public void SyncTeamNamesNow()
+    {
+        if (IsServer)
+        {
+            SyncTeamInfoToClients();
+        }
+        else
+        {
+            // ขอข้อมูลทีมจากเซิร์ฟเวอร์
+            RequestTeamInfoServerRpc(NetworkManager.Singleton.LocalClientId);
+        }
+    }
+    
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestTeamInfoServerRpc(ulong clientId)
+    {
+        // ส่งข้อมูลทีมไปให้ไคลเอนต์ที่ขอ
+        SendTeamInfoToClientRpc(clientId, team1Name.Value, team2Name.Value);
+    }
+    
+    [ClientRpc]
+    private void SendTeamInfoToClientRpc(ulong targetClientId, string team1NameStr, string team2NameStr)
+    {
+        if (NetworkManager.Singleton.LocalClientId == targetClientId)
+        {
+            // อัปเดต UI โดยตรง
+            if (team1ScoreText != null)
+            {
+                team1ScoreText.text = $"{team1NameStr}: {team1Score.Value}";
+            }
+            
+            if (team2ScoreText != null)
+            {
+                team2ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
+            }
+            
+            Debug.Log($"[TeamScoreManager] Received direct team info - Team1: {team1NameStr}, Team2: {team2NameStr}");
+        }
+    }
+    
+    // เมธอดสำหรับบังคับอัปเดต UI ทันที
+    public void ForceUpdateUI()
+    {
+        UpdateScoreUI();
+    }
+    
+    // เมธอดสำหรับทดสอบการเชื่อมต่อ
+    public void TestConnection()
+    {
+        Debug.Log("[TeamScoreManager] Testing connection...");
+        
+        if (IsServer)
+        {
+            TestConnectionClientRpc();
+        }
+        else
+        {
+            TestConnectionServerRpc(NetworkManager.Singleton.LocalClientId);
+        }
+    }
+    
+    [ServerRpc(RequireOwnership = false)]
+    private void TestConnectionServerRpc(ulong clientId)
+    {
+        Debug.Log($"[TeamScoreManager] Server received test from client: {clientId}");
+        TestConnectionResponseClientRpc(clientId);
+    }
+    
+    [ClientRpc]
+    private void TestConnectionClientRpc()
+    {
+        Debug.Log("[TeamScoreManager] Client received test from server");
+    }
+    
+    [ClientRpc]
+    private void TestConnectionResponseClientRpc(ulong clientId)
+    {
+        if (NetworkManager.Singleton.LocalClientId == clientId)
+        {
+            Debug.Log("[TeamScoreManager] Client received test response from server");
+        }
     }
 }
