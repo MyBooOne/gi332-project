@@ -16,30 +16,58 @@ public class TeamScoreManager : NetworkBehaviour
     [Header("UI References")]
     [SerializeField] private TextMeshProUGUI team1ScoreText;
     [SerializeField] private TextMeshProUGUI team2ScoreText;
+    [SerializeField] private TextMeshProUGUI team3ScoreText; // เพิ่มอ้างอิงถึง UI ของทีม 3
+    [SerializeField] private TextMeshProUGUI team4ScoreText; // เพิ่มอ้างอิงถึง UI ของทีม 4
     [SerializeField] private GameObject gameOverPanel;
     [SerializeField] private TextMeshProUGUI winnerText;
     [SerializeField] private Button exitButton;
     
     // Team scores - we'll fix them to always increment by exactly 1
-    private readonly NetworkVariable<int> team1Score = new NetworkVariable<int>(0);
-    private readonly NetworkVariable<int> team2Score = new NetworkVariable<int>(0);
+    private readonly NetworkVariable<int> team1Score = new NetworkVariable<int>(0, 
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
+        
+    private readonly NetworkVariable<int> team2Score = new NetworkVariable<int>(0,
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
     
     // Store player information
     private readonly Dictionary<ulong, int> playerTeams = new Dictionary<ulong, int>(); // 1 = team1, 2 = team2
     private readonly Dictionary<ulong, string> playerNames = new Dictionary<ulong, string>(); // เก็บชื่อผู้เล่น
     
     // Team colors
-    private readonly NetworkVariable<Color32> team1Color = new NetworkVariable<Color32>(new Color32(255, 0, 0, 255)); // Default: Red
-    private readonly NetworkVariable<Color32> team2Color = new NetworkVariable<Color32>(new Color32(0, 0, 255, 255)); // Default: Blue
+    private readonly NetworkVariable<Color32> team1Color = new NetworkVariable<Color32>(new Color32(255, 0, 0, 255),
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
+        
+    private readonly NetworkVariable<Color32> team2Color = new NetworkVariable<Color32>(new Color32(0, 0, 255, 255),
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
     
     // Team names (to be properly synced)
-    private readonly NetworkVariable<NetworkString> team1Name = new NetworkVariable<NetworkString>(new NetworkString("Red Team"));
-    private readonly NetworkVariable<NetworkString> team2Name = new NetworkVariable<NetworkString>(new NetworkString("Blue Team"));
+    private readonly NetworkVariable<NetworkString> team1Name = new NetworkVariable<NetworkString>(new NetworkString("Red Team"),
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
+        
+    private readonly NetworkVariable<NetworkString> team2Name = new NetworkVariable<NetworkString>(new NetworkString("Blue Team"),
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
+    
+    // เพิ่มตัวแปรเพื่อเก็บรายชื่อผู้เล่นในแต่ละทีม
+    private readonly Dictionary<int, List<ulong>> teamPlayers = new Dictionary<int, List<ulong>>(); 
     
     // Game state
-    private readonly NetworkVariable<bool> isGameOver = new NetworkVariable<bool>(false);
-    private readonly NetworkVariable<int> winningTeamId = new NetworkVariable<int>(0); // 1 = team1, 2 = team2
-    private readonly NetworkVariable<NetworkString> winningTeamName = new NetworkVariable<NetworkString>(new NetworkString(""));
+    private readonly NetworkVariable<bool> isGameOver = new NetworkVariable<bool>(false,
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
+        
+    private readonly NetworkVariable<int> winningTeamId = new NetworkVariable<int>(0,
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
+        
+    private readonly NetworkVariable<NetworkString> winningTeamName = new NetworkVariable<NetworkString>(new NetworkString(""),
+        NetworkVariableReadPermission.Everyone, 
+        NetworkVariableWritePermission.Server);
     
     // Flag to prevent double scoring
     private bool processingScore = false;
@@ -89,6 +117,10 @@ public class TeamScoreManager : NetworkBehaviour
         {
             gameOverPanel.SetActive(false);
         }
+        
+        // เตรียมรายชื่อผู้เล่นสำหรับแต่ละทีม
+        teamPlayers[1] = new List<ulong>();
+        teamPlayers[2] = new List<ulong>();
     }
     
     public override void OnNetworkSpawn()
@@ -154,6 +186,7 @@ public class TeamScoreManager : NetworkBehaviour
         }
     }
     
+    // แก้ไขการจัดการชื่อผู้เล่นเพื่อสนับสนุนหลายผู้เล่นต่อทีม
     public void ForceUpdateName(ulong clientId, string playerName)
     {
         if (string.IsNullOrEmpty(playerName)) return;
@@ -163,36 +196,18 @@ public class TeamScoreManager : NetworkBehaviour
         // เก็บชื่อผู้เล่นไว้ใน Dictionary
         playerNames[clientId] = playerName;
         
-        // ตรวจสอบว่าเป็น Host หรือไม่
-        if (clientId == NetworkManager.Singleton.LocalClientId && IsServer)
+        // กำหนดทีม (ถ้ายังไม่มี)
+        if (!playerTeams.ContainsKey(clientId))
         {
-            // อัปเดตทีม 1 (Host)
-            if (IsServer) // เฉพาะเซิร์ฟเวอร์เท่านั้นที่เปลี่ยน NetworkVariable
-            {
-                team1Name.Value = playerName + "'s Team";
-                Debug.Log($"[TeamScoreManager] ForceUpdateName set Team 1 name to: {team1Name.Value}");
-            }
-            
-            // อัปเดต UI ท้องถิ่นทันที
-            if (team1ScoreText != null)
-            {
-                team1ScoreText.text = $"{playerName}'s Team: {team1Score.Value}";
-            }
+            // กำหนดทีมตามรูปแบบ: clientId คู่ = ทีม 1, clientId คี่ = ทีม 2
+            int teamId = (clientId % 2 == 0) ? 1 : 2;
+            AssignPlayerToTeam(clientId, teamId);
         }
-        else
+        
+        // อัปเดตชื่อทีม
+        if (IsServer)
         {
-            // อัปเดตทีม 2 (Client)
-            if (IsServer) // เฉพาะเซิร์ฟเวอร์เท่านั้นที่เปลี่ยน NetworkVariable
-            {
-                team2Name.Value = playerName + "'s Team";
-                Debug.Log($"[TeamScoreManager] ForceUpdateName set Team 2 name to: {team2Name.Value}");
-            }
-            
-            // อัปเดต UI ท้องถิ่นทันที
-            if (team2ScoreText != null)
-            {
-                team2ScoreText.text = $"{playerName}'s Team: {team2Score.Value}";
-            }
+            UpdateTeamNames();
         }
         
         // ถ้าเป็นเซิร์ฟเวอร์ ให้ส่งข้อมูลไปยังทุกไคลเอนต์
@@ -208,6 +223,62 @@ public class TeamScoreManager : NetworkBehaviour
                 RequestNameUpdateServerRpc(clientId, playerName);
             }
         }
+    }
+    
+    // เพิ่มเมธอดสำหรับจัดการผู้เล่นเข้าทีม
+    private void AssignPlayerToTeam(ulong clientId, int teamId)
+    {
+        // เก็บข้อมูลทีมของผู้เล่น
+        playerTeams[clientId] = teamId;
+        
+        // เพิ่มผู้เล่นเข้าในรายชื่อของทีม
+        if (!teamPlayers.ContainsKey(teamId))
+        {
+            teamPlayers[teamId] = new List<ulong>();
+        }
+        
+        if (!teamPlayers[teamId].Contains(clientId))
+        {
+            teamPlayers[teamId].Add(clientId);
+        }
+        
+        Debug.Log($"[TeamScoreManager] Assigned player {clientId} to team {teamId}");
+    }
+    
+    // เพิ่มเมธอดสำหรับอัปเดตชื่อทีมจากผู้เล่นทั้งหมด
+    private void UpdateTeamNames()
+    {
+        if (!IsServer) return;
+        
+        // อัปเดตชื่อทีม 1
+        if (teamPlayers.ContainsKey(1) && teamPlayers[1].Count > 0)
+        {
+            string teamName = "Team 1";
+            
+            // ตั้งชื่อตามผู้เล่นคนแรก
+            if (teamPlayers[1].Count > 0 && playerNames.TryGetValue(teamPlayers[1][0], out string playerName))
+            {
+                teamName = playerName + "'s Team";
+            }
+            
+            team1Name.Value = teamName;
+        }
+        
+        // อัปเดตชื่อทีม 2
+        if (teamPlayers.ContainsKey(2) && teamPlayers[2].Count > 0)
+        {
+            string teamName = "Team 2";
+            
+            // ตั้งชื่อตามผู้เล่นคนแรก
+            if (teamPlayers[2].Count > 0 && playerNames.TryGetValue(teamPlayers[2][0], out string playerName))
+            {
+                teamName = playerName + "'s Team";
+            }
+            
+            team2Name.Value = teamName;
+        }
+        
+        Debug.Log($"[TeamScoreManager] Updated team names - Team1: {team1Name.Value}, Team2: {team2Name.Value}");
     }
     
     [ServerRpc(RequireOwnership = false)]
@@ -231,6 +302,19 @@ public class TeamScoreManager : NetworkBehaviour
             team2ScoreText.text = $"{team2Name.Value}: {team2Score.Value}";
             team2ScoreText.color = team2Color.Value;
         }
+        
+        // อัปเดต UI สำหรับทีม 3 และ 4 (ซึ่งจะแสดงข้อมูลเหมือนทีม 1 และ 2)
+        if (team3ScoreText != null)
+        {
+            team3ScoreText.text = $"{team1Name.Value}: {team1Score.Value}";
+            team3ScoreText.color = team1Color.Value;
+        }
+        
+        if (team4ScoreText != null)
+        {
+            team4ScoreText.text = $"{team2Name.Value}: {team2Score.Value}";
+            team4ScoreText.color = team2Color.Value;
+        }
     }
     
     private IEnumerator CheckTeamColorsMultipleTimes()
@@ -253,6 +337,7 @@ public class TeamScoreManager : NetworkBehaviour
         }
     }
     
+    // แก้ไขเมธอดการตั้งค่าทีมให้รองรับหลายผู้เล่นต่อทีม
     private void SetupTeamColors()
     {
         Debug.Log("[TeamScoreManager] Setting up team colors");
@@ -273,54 +358,32 @@ public class TeamScoreManager : NetworkBehaviour
                     Color playerColor = renderers[0].material.color;
                     Debug.Log($"[TeamScoreManager] Found player color - ClientId: {client.ClientId}, Color: {playerColor}");
                     
-                    // Assign teams based on server/client status
-                    if (client.ClientId == NetworkManager.ServerClientId)
+                    // กำหนดทีมตามรูปแบบ: clientId คู่ = ทีม 1, clientId คี่ = ทีม 2
+                    int teamId = (client.ClientId % 2 == 0) ? 1 : 2;
+                    AssignPlayerToTeam(client.ClientId, teamId);
+                    
+                    // อัปเดตสีทีมถ้าเป็นผู้เล่นคนแรกในทีม
+                    if (teamPlayers.ContainsKey(teamId) && teamPlayers[teamId].Count > 0 && teamPlayers[teamId][0] == client.ClientId)
                     {
-                        // Server/Host is team 1
-                        playerTeams[client.ClientId] = 1;
-                        
-                        // Update color if changed
-                        if (ColorIsDifferent(team1Color.Value, playerColor))
+                        if (teamId == 1 && ColorIsDifferent(team1Color.Value, playerColor))
                         {
                             team1Color.Value = playerColor;
-                            // ใช้ชื่อผู้เล่นที่เก็บไว้แทนชื่อสี
-                            if (playerNames.TryGetValue(client.ClientId, out string playerName))
-                            {
-                                team1Name.Value = playerName + "'s Team";
-                            }
-                            else
-                            {
-                                team1Name.Value = GetTeamNameFromColor(playerColor);
-                            }
                             colorChanged = true;
-                            Debug.Log($"[TeamScoreManager] Updated Team 1 color to {playerColor}, name: {team1Name.Value}");
+                            Debug.Log($"[TeamScoreManager] Updated Team 1 color to {playerColor}");
                         }
-                    }
-                    else
-                    {
-                        // Client is team 2
-                        playerTeams[client.ClientId] = 2;
-                        
-                        // Update color if changed
-                        if (ColorIsDifferent(team2Color.Value, playerColor))
+                        else if (teamId == 2 && ColorIsDifferent(team2Color.Value, playerColor))
                         {
                             team2Color.Value = playerColor;
-                            // ใช้ชื่อผู้เล่นที่เก็บไว้แทนชื่อสี
-                            if (playerNames.TryGetValue(client.ClientId, out string playerName))
-                            {
-                                team2Name.Value = playerName + "'s Team";
-                            }
-                            else
-                            {
-                                team2Name.Value = GetTeamNameFromColor(playerColor);
-                            }
                             colorChanged = true;
-                            Debug.Log($"[TeamScoreManager] Updated Team 2 color to {playerColor}, name: {team2Name.Value}");
+                            Debug.Log($"[TeamScoreManager] Updated Team 2 color to {playerColor}");
                         }
                     }
                 }
             }
         }
+        
+        // อัปเดตชื่อทีม
+        UpdateTeamNames();
         
         // Only sync colors if they changed
         if (colorChanged)
@@ -362,6 +425,17 @@ public class TeamScoreManager : NetworkBehaviour
         if (team2ScoreText != null)
         {
             team2ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
+        }
+        
+        // อัปเดต UI สำหรับทีม 3 และ 4 (ซึ่งจะแสดงข้อมูลเหมือนทีม 1 และ 2)
+        if (team3ScoreText != null)
+        {
+            team3ScoreText.text = $"{team1NameStr}: {team1Score.Value}";
+        }
+        
+        if (team4ScoreText != null)
+        {
+            team4ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
         }
         
         // อัปเดต NetworkVariable บนเซิร์ฟเวอร์
@@ -417,6 +491,19 @@ public class TeamScoreManager : NetworkBehaviour
         {
             team2ScoreText.color = t2Color;
             team2ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
+        }
+        
+        // อัปเดต UI สำหรับทีม 3 และ 4 (ซึ่งจะแสดงข้อมูลเหมือนทีม 1 และ 2)
+        if (team3ScoreText != null)
+        {
+            team3ScoreText.color = t1Color;
+            team3ScoreText.text = $"{team1NameStr}: {team1Score.Value}";
+        }
+        
+        if (team4ScoreText != null)
+        {
+            team4ScoreText.color = t2Color;
+            team4ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
         }
     }
     
@@ -494,6 +581,7 @@ public class TeamScoreManager : NetworkBehaviour
         Debug.Log($"[TeamScoreManager] Updated winner text to: {winnerText.text} with color {winnerText.color}");
     }
     
+    // แก้ไขเมธอดอัปเดต UI ให้รองรับทีม 3 และ 4
     private void UpdateScoreUI()
     {
         // Update team 1 (Host) score text
@@ -501,7 +589,6 @@ public class TeamScoreManager : NetworkBehaviour
         {
             team1ScoreText.text = $"{team1Name.Value}: {team1Score.Value}";
             team1ScoreText.color = team1Color.Value;
-            Debug.Log($"[TeamScoreManager] Updated Team 1 UI: {team1Name.Value}, Score: {team1Score.Value}, Color: {team1Color.Value}");
         }
         
         // Update team 2 (Join) score text
@@ -509,7 +596,19 @@ public class TeamScoreManager : NetworkBehaviour
         {
             team2ScoreText.text = $"{team2Name.Value}: {team2Score.Value}";
             team2ScoreText.color = team2Color.Value;
-            Debug.Log($"[TeamScoreManager] Updated Team 2 UI: {team2Name.Value}, Score: {team2Score.Value}, Color: {team2Color.Value}");
+        }
+        
+        // อัปเดต UI สำหรับทีม 3 และ 4 (ซึ่งจะแสดงข้อมูลเหมือนทีม 1 และ 2)
+        if (team3ScoreText != null)
+        {
+            team3ScoreText.text = $"{team1Name.Value}: {team1Score.Value}";
+            team3ScoreText.color = team1Color.Value;
+        }
+        
+        if (team4ScoreText != null)
+        {
+            team4ScoreText.text = $"{team2Name.Value}: {team2Score.Value}";
+            team4ScoreText.color = team2Color.Value;
         }
         
         // Check win condition (server only)
@@ -517,6 +616,8 @@ public class TeamScoreManager : NetworkBehaviour
         {
             CheckWinCondition();
         }
+        
+        Debug.Log($"[TeamScoreManager] Updated UI - Team1: {team1Name.Value} ({team1Score.Value}), Team2: {team2Name.Value} ({team2Score.Value})");
     }
     
     private void CheckWinCondition()
@@ -545,8 +646,12 @@ public class TeamScoreManager : NetworkBehaviour
     [ClientRpc]
     private void ShowGameOverClientRpc(int winningTeam, string winningName)
     {
-        winningTeamId.Value = winningTeam;
-        winningTeamName.Value = winningName;
+        // ไคลเอนต์ไม่สามารถเปลี่ยนค่า NetworkVariable ได้โดยตรง
+        // จึงไม่ต้องมีบรรทัดนี้: winningTeamId.Value = winningTeam;
+        // และไม่ต้องมีบรรทัดนี้: winningTeamName.Value = winningName;
+        
+        // แต่เก็บค่าไว้ใช้ท้องถิ่น
+        Debug.Log($"[TeamScoreManager] Showing game over for team {winningTeam}: {winningName}");
         ShowGameOver();
     }
     
@@ -599,50 +704,28 @@ public class TeamScoreManager : NetworkBehaviour
         processingScore = true;
         
         // Look up the team of the killer - ALWAYS increase score by exactly 1
-        if (playerTeams.TryGetValue(killerClientId, out int teamId))
+        if (!playerTeams.TryGetValue(killerClientId, out int teamId))
         {
-            Debug.Log($"[TeamScoreManager] Player {killerClientId} is in Team {teamId}");
-            
-            if (teamId == 1)
-            {
-                // FORCE exactly 1 point increment
-                int currentScore = team1Score.Value;
-                team1Score.Value = currentScore + 1;
-                Debug.Log($"[TeamScoreManager] Added 1 score to Team 1: {currentScore} -> {team1Score.Value}");
-            }
-            else if (teamId == 2)
-            {
-                // FORCE exactly 1 point increment
-                int currentScore = team2Score.Value;
-                team2Score.Value = currentScore + 1;
-                Debug.Log($"[TeamScoreManager] Added 1 score to Team 2: {currentScore} -> {team2Score.Value}");
-            }
+            // ถ้ายังไม่มีทีม ให้กำหนดตามรูปแบบ: clientId คู่ = ทีม 1, clientId คี่ = ทีม 2
+            teamId = (killerClientId % 2 == 0) ? 1 : 2;
+            AssignPlayerToTeam(killerClientId, teamId);
         }
-        else
+        
+        Debug.Log($"[TeamScoreManager] Player {killerClientId} is in Team {teamId}");
+        
+        if (teamId == 1)
         {
-            Debug.LogWarning($"[TeamScoreManager] No team info for player ClientId: {killerClientId}");
-            
-            // Fallback method - determine team by client ID
-            if (killerClientId == NetworkManager.ServerClientId)
-            {
-                // FORCE exactly 1 point increment
-                int currentScore = team1Score.Value;
-                team1Score.Value = currentScore + 1;
-                Debug.Log($"[TeamScoreManager] (Fallback) Added 1 score to Team 1 (Host): {currentScore} -> {team1Score.Value}");
-                
-                // Store team for future reference
-                playerTeams[killerClientId] = 1;
-            }
-            else
-            {
-                // FORCE exactly 1 point increment
-                int currentScore = team2Score.Value;
-                team2Score.Value = currentScore + 1;
-                Debug.Log($"[TeamScoreManager] (Fallback) Added 1 score to Team 2 (Client): {currentScore} -> {team2Score.Value}");
-                
-                // Store team for future reference
-                playerTeams[killerClientId] = 2;
-            }
+            // FORCE exactly 1 point increment
+            int currentScore = team1Score.Value;
+            team1Score.Value = currentScore + 1;
+            Debug.Log($"[TeamScoreManager] Added 1 score to Team 1: {currentScore} -> {team1Score.Value}");
+        }
+        else if (teamId == 2)
+        {
+            // FORCE exactly 1 point increment
+            int currentScore = team2Score.Value;
+            team2Score.Value = currentScore + 1;
+            Debug.Log($"[TeamScoreManager] Added 1 score to Team 2: {currentScore} -> {team2Score.Value}");
         }
         
         // Reset the flag after a short delay
@@ -674,7 +757,7 @@ public class TeamScoreManager : NetworkBehaviour
         UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
     }
     
-    // เพิ่มใน TeamScoreManager.cs
+    // แก้ไขเมธอดลงทะเบียนชื่อผู้เล่นให้รองรับหลายผู้เล่นต่อทีม
     public void RegisterPlayerName(ulong clientId, string playerName)
     {
         Debug.Log($"[TeamScoreManager] RegisterPlayerName - ClientId: {clientId}, Name: {playerName}");
@@ -682,24 +765,17 @@ public class TeamScoreManager : NetworkBehaviour
         // เก็บชื่อผู้เล่นไว้
         playerNames[clientId] = playerName;
     
-        // ตรวจสอบว่าเป็น Host หรือไม่
-        if (clientId == NetworkManager.ServerClientId)
+        // ถ้ายังไม่มีทีม ให้กำหนดตามรูปแบบ: clientId คู่ = ทีม 1, clientId คี่ = ทีม 2
+        if (!playerTeams.ContainsKey(clientId))
         {
-            // ปรับชื่อทีม 1 (Host) - เฉพาะเซิร์ฟเวอร์
-            if (IsServer)
-            {
-                team1Name.Value = playerName + "'s Team";
-                Debug.Log($"[TeamScoreManager] Updated Team 1 name to: {team1Name.Value}");
-            }
+            int teamId = (clientId % 2 == 0) ? 1 : 2;
+            AssignPlayerToTeam(clientId, teamId);
         }
-        else
+    
+        // อัปเดตชื่อทีม (เฉพาะเซิร์ฟเวอร์)
+        if (IsServer)
         {
-            // ปรับชื่อทีม 2 (Client) - เฉพาะเซิร์ฟเวอร์
-            if (IsServer)
-            {
-                team2Name.Value = playerName + "'s Team";
-                Debug.Log($"[TeamScoreManager] Updated Team 2 name to: {team2Name.Value}");
-            }
+            UpdateTeamNames();
         }
     
         // อัปเดต UI
@@ -714,12 +790,20 @@ public class TeamScoreManager : NetworkBehaviour
 
     public void ResetGameState()
     {
-        team1Score.Value = 0;
-        team2Score.Value = 0;
-        isGameOver.Value = false;
-        winningTeamId.Value = 0;
-        winningTeamName.Value = "";
-        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (IsServer)
+        {
+            team1Score.Value = 0;
+            team2Score.Value = 0;
+            isGameOver.Value = false;
+            winningTeamId.Value = 0;
+            winningTeamName.Value = "";
+        }
+
+        if (gameOverPanel != null) 
+        {
+            gameOverPanel.SetActive(false);
+        }
+        
         UpdateScoreUI();
         
         // ส่งข้อมูลทีมอีกครั้งเมื่อเริ่มเกมใหม่
@@ -744,6 +828,13 @@ public class TeamScoreManager : NetworkBehaviour
             Debug.Log($"  Player {pair.Key}: Team {pair.Value}");
         }
         
+        Debug.Log("Team Players:");
+        foreach (var pair in teamPlayers)
+        {
+            string playerList = string.Join(", ", pair.Value);
+            Debug.Log($"  Team {pair.Key}: Players [{playerList}]");
+        }
+        
         Debug.Log("Player Names:");
         foreach (var pair in playerNames)
         {
@@ -753,6 +844,8 @@ public class TeamScoreManager : NetworkBehaviour
         Debug.Log("UI Components:");
         Debug.Log($"  team1ScoreText: {(team1ScoreText != null ? "Found" : "Missing")}");
         Debug.Log($"  team2ScoreText: {(team2ScoreText != null ? "Found" : "Missing")}");
+        Debug.Log($"  team3ScoreText: {(team3ScoreText != null ? "Found" : "Missing")}");
+        Debug.Log($"  team4ScoreText: {(team4ScoreText != null ? "Found" : "Missing")}");
         Debug.Log($"  gameOverPanel: {(gameOverPanel != null ? "Found" : "Missing")}");
         Debug.Log($"  winnerText: {(winnerText != null ? "Found" : "Missing")}");
         Debug.Log($"  exitButton: {(exitButton != null ? "Found" : "Missing")}");
@@ -794,6 +887,17 @@ public class TeamScoreManager : NetworkBehaviour
             if (team2ScoreText != null)
             {
                 team2ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
+            }
+            
+            // อัปเดต UI สำหรับทีม 3 และ 4
+            if (team3ScoreText != null)
+            {
+                team3ScoreText.text = $"{team1NameStr}: {team1Score.Value}";
+            }
+            
+            if (team4ScoreText != null)
+            {
+                team4ScoreText.text = $"{team2NameStr}: {team2Score.Value}";
             }
             
             Debug.Log($"[TeamScoreManager] Received direct team info - Team1: {team1NameStr}, Team2: {team2NameStr}");

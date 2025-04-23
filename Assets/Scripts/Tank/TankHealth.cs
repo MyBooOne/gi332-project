@@ -56,13 +56,20 @@ namespace Complete
 
         public void TakeDamage(float amount, ulong attackerId)
         {
-            if (!IsServer) return;
-            
-            // Record the attacker ID
-            m_LastAttackerId.Value = attackerId;
-            Debug.Log($"[TankHealth] Taking damage: {amount} from attacker: {attackerId}, Current health: {m_CurrentHealth.Value}");
-            
-            m_CurrentHealth.Value -= amount;
+            try
+            {
+                if (!IsServer) return;
+        
+                // Record the attacker ID
+                m_LastAttackerId.Value = attackerId;
+                Debug.Log($"[TankHealth] Taking damage: {amount} from attacker: {attackerId}, Current health: {m_CurrentHealth.Value}");
+        
+                m_CurrentHealth.Value -= amount;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[TankHealth] Error in TakeDamage: {e.Message}");
+            }
         }
 
         private void SetHealthUI()
@@ -71,48 +78,62 @@ namespace Complete
             m_FillImage.color = Color.Lerp(m_ZeroHealthColor, m_FullHealthColor, m_CurrentHealth.Value / m_StartingHealth);
         }
 
-        [ServerRpc]
+        [ServerRpc(RequireOwnership = false)]
         private void OnDeathServerRpc()
         {
-            if (m_Dead.Value) return;
-            
-            Debug.Log($"[TankHealth] Tank died, last attacker: {m_LastAttackerId.Value}");
-            m_Dead.Value = true;
-            
-            // Add score to killer if TeamScoreManager exists
-            if (TeamScoreManager.Instance != null && m_LastAttackerId.Value != ulong.MaxValue)
+            try
             {
-                Debug.Log($"[TankHealth] Adding score to killer: {m_LastAttackerId.Value}");
-                TeamScoreManager.Instance.AddScore(m_LastAttackerId.Value);
+                if (m_Dead.Value) return;
+        
+                Debug.Log($"[TankHealth] Tank died, last attacker: {m_LastAttackerId.Value}");
+                m_Dead.Value = true;
+        
+                // Add score to killer if TeamScoreManager exists
+                if (TeamScoreManager.Instance != null && m_LastAttackerId.Value != ulong.MaxValue)
+                {
+                    Debug.Log($"[TankHealth] Adding score to killer: {m_LastAttackerId.Value}");
+                    TeamScoreManager.Instance.AddScore(m_LastAttackerId.Value);
+                }
+        
+                OnDeathClientRpc();
             }
-            
-            OnDeathClientRpc();
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[TankHealth] Error in OnDeathServerRpc: {e.Message}");
+            }
         }
 
         [ClientRpc]
         private void OnDeathClientRpc()
         {
-            m_ExplosionParticles.transform.position = transform.position;
-            m_ExplosionParticles.gameObject.SetActive(true);
-            m_ExplosionParticles.Play();
-            m_ExplosionAudio.Play();
-            
-            // Hide the tank visually instead of disabling the entire object
-            foreach (var renderer in GetComponentsInChildren<Renderer>())
+            try
             {
-                renderer.enabled = false;
+                m_ExplosionParticles.transform.position = transform.position;
+                m_ExplosionParticles.gameObject.SetActive(true);
+                m_ExplosionParticles.Play();
+                m_ExplosionAudio.Play();
+        
+                // Hide the tank visually instead of disabling the entire object
+                foreach (var renderer in GetComponentsInChildren<Renderer>())
+                {
+                    renderer.enabled = false;
+                }
+        
+                // Disable audio
+                foreach (var audioSource in GetComponentsInChildren<AudioSource>())
+                {
+                    audioSource.enabled = false;
+                }
+        
+                // Disable colliders
+                foreach (var collider in GetComponentsInChildren<Collider>())
+                {
+                    collider.enabled = false;
+                }
             }
-            
-            // Disable audio
-            foreach (var audioSource in GetComponentsInChildren<AudioSource>())
+            catch (System.Exception e)
             {
-                audioSource.enabled = false;
-            }
-            
-            // Disable colliders
-            foreach (var collider in GetComponentsInChildren<Collider>())
-            {
-                collider.enabled = false;
+                Debug.LogError($"[TankHealth] Error in OnDeathClientRpc: {e.Message}");
             }
         }
 
