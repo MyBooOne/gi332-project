@@ -386,19 +386,25 @@ public class PlayerLobbyManager : NetworkBehaviour
     {
         if (teamScoreManager != null)
         {
-            // ส่งข้อมูลทีมไปให้ไคลเอนต์ที่ขอ
-            SendTeamNamesToClientClientRpc(clientId, teamScoreManager.GetTeam1Name(), teamScoreManager.GetTeam2Name());
+            // ส่งข้อมูลทีมไปให้ไคลเอนต์ที่ขอ (แก้ไขให้ส่งชื่อทั้ง 4 ทีม)
+            SendTeamNamesToClientClientRpc(
+                clientId, 
+                teamScoreManager.GetTeam1Name(), 
+                teamScoreManager.GetTeam2Name(),
+                teamScoreManager.GetTeam3Name(),
+                teamScoreManager.GetTeam4Name()
+            );
         }
     }
     
     [ClientRpc]
-    private void SendTeamNamesToClientClientRpc(ulong targetClientId, string team1Name, string team2Name)
+    private void SendTeamNamesToClientClientRpc(ulong targetClientId, string team1Name, string team2Name, string team3Name, string team4Name)
     {
         if (NetworkManager.Singleton.LocalClientId == targetClientId && teamScoreManager != null)
         {
-            // อัปเดตชื่อทีมในไคลเอนต์
-            teamScoreManager.SetTeamNames(team1Name, team2Name);
-            Debug.Log($"[PlayerLobbyManager] Updated team names - Team1: {team1Name}, Team2: {team2Name}");
+            // อัปเดตชื่อทีมในไคลเอนต์ (แก้ไขให้ส่งชื่อทั้ง 4 ทีม)
+            teamScoreManager.SetTeamNames(team1Name, team2Name, team3Name, team4Name);
+            Debug.Log($"[PlayerLobbyManager] Updated team names - Team1: {team1Name}, Team2: {team2Name}, Team3: {team3Name}, Team4: {team4Name}");
         }
     }
     
